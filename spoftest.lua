@@ -250,42 +250,42 @@ local function replaceCoreElements()
 end
 
 -- ==========================================
--- 3. INTERCEPT INSPECT ENGINE (INTEGRATED)
+-- 3. STABILIZED INSPECT SPOOFER (PASSIVE)
 -- ==========================================
 local successHook, err = pcall(function()
     local GuiService = game:GetService("GuiService")
     local Players = game:GetService("Players")
     local localPlayer = Players.LocalPlayer
 
-    -- 1. Suppress default menu to prevent crashes
-    pcall(function() GuiService:SetInspectMenuEnabled(false) end)
+    -- REMOVED: SetInspectMenuEnabled(false) - This was causing the 'ipairs' error.
+    -- We now let the game handle the menu initialization, but we hijack the request.
 
-    -- 2. Custom function to render the spoofed look
     local function showSpoofedInspect()
-        local targetId = getTargetId()
+        local targetId = getTargetId() 
         local success, desc = pcall(function()
             return Players:GetHumanoidDescriptionFromUserId(targetId)
         end)
         
         if success and desc then
-            -- Injecting the description into the custom viewer
+            -- Injecting the description into the viewer
             GuiService:InspectPlayerFromHumanoidDescription(desc, getSpoofDisplayName())
         else
             warn("[Daemon] Failed to fetch spoofed appearance.")
         end
     end
 
-    -- 3. Intercept the namecalls
+    -- Hook the Namecall
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
         local method = getnamecallmethod()
         local args = {...}
         
-        -- Intercept Inspect requests
-        if self == GuiService and (method == "InspectPlayerFromUserId" or method == "InspectPlayerFromHumanoidDescription") then
-            if args[1] == localPlayer.UserId or args[1] == getTargetId() then
+        -- Redirect the inspect call only
+        if self == GuiService and method == "InspectPlayerFromUserId" then
+            -- If someone inspects you, redirect to spoofed data
+            if args[1] == localPlayer.UserId then
                 showSpoofedInspect()
-                return -- Block default logic
+                return nil 
             end
         end
         
@@ -294,10 +294,11 @@ local successHook, err = pcall(function()
 end)
 
 if successHook then
-    print("[Daemon] Inspect Spoofer injected into main flow.")
+    print("[Daemon] Stable Inspect Spoofer active.")
 else
-    warn("[Daemon] Inspect hooking failed: " .. tostring(err))
+    warn("[Daemon] Inspect hook initialization failed: " .. tostring(err))
 end
+
 -- ==========================================
 -- 4. INITIALIZATION & SPAWN BINDINGS
 -- ==========================================
