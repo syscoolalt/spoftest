@@ -249,16 +249,11 @@ local function replaceCoreElements()
 end
 
 -- ==========================================
--- 3. INTERCEPT INSPECT ENGINE (METATABLE + HOOK)
+-- 3. INTERCEPT INSPECT ENGINE (HOOKMETAMETHOD)
 -- ==========================================
-local rawMetatable = getrawmetatable and getrawmetatable(game)
-if rawMetatable and makewriteable then
-	makewriteable(rawMetatable)
-	local oldNamecall = rawMetatable.__namecall
-	local oldIndex = rawMetatable.__index
-	
-	-- Intercept system indexing requests for local user properties
-	rawMetatable.__index = newcclosure(function(self, key)
+local successHook, err = pcall(function()
+	local oldIndex
+	oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
 		if not checkcaller() and self == localPlayer then
 			if key == "UserId" then
 				return getTargetId()
@@ -269,34 +264,42 @@ if rawMetatable and makewriteable then
 			end
 		end
 		return oldIndex(self, key)
-	end)
-	
-	-- Intercept system commands (Inspect Requests)
-	rawMetatable.__namecall = newcclosure(function(self, ...)
+	end))
+
+	local oldNamecall
+	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
 		local method = getnamecallmethod()
-		if self == GuiService and (method == "InspectPlayerFromUserId" or method == "InspectPlayerFromHumanoidDescription") then
-			local args = {...}
-			local targetId = getTargetId()
-			
-			-- Handle the "Empty Inspect" experiment
-			if isEmptyInspectEnabled() and (args[1] == localPlayer.UserId or args[1] == targetId) then
-				-- Create a completely blank HumanoidDescription instance
-				local blankDescription = Instance.new("HumanoidDescription")
-				
-				-- Force Roblox to open the Inspect Menu using the empty HumanoidDescription instead of a UserID
-				return oldNamecall(self, blankDescription, "Empty Spoofer Profile")
-			end
-			
-			if args[1] == localPlayer.UserId or args[1] == targetId then
-				-- Detour Inspect menu to query target asset configurations directly
-				return oldNamecall(self, targetId, unpack(args, 2))
+		local args = {...}
+		
+		-- Intercept Players Service requests for Avatar Descriptions (Inspect Menu assets)
+		if self == Players and (method == "GetHumanoidDescriptionFromUserId" or method == "GetCharacterAppearanceAsync" or method == "GetCharacterAppearanceInfoAsync") then
+			if args[1] == localPlayer.UserId then
+				if isEmptyInspectEnabled() then
+					return oldNamecall(self, 0) -- Forces a blank, unequipped slate
+				end
+				return oldNamecall(self, getTargetId(), unpack(args, 2))
 			end
 		end
+		
+		-- Intercept GuiService Inspect Menu openings
+		if self == GuiService and (method == "InspectPlayerFromUserId" or method == "InspectPlayerFromHumanoidDescription") then
+			if args[1] == localPlayer.UserId or args[1] == getTargetId() then
+				if isEmptyInspectEnabled() then
+					local blankDescription = Instance.new("HumanoidDescription")
+					return oldNamecall(self, blankDescription, "Empty Spoofer Profile")
+				end
+				return oldNamecall(self, getTargetId(), unpack(args, 2))
+			end
+		end
+		
 		return oldNamecall(self, ...)
-	end)
-	print("[Daemon] Engine metatable hooked for Inspect intercepts.")
+	end))
+end)
+
+if successHook then
+	print("[Daemon] Engine detours applied cleanly via hookmetamethod.")
 else
-	warn("[Daemon] Metatable hooking unsupported on this executor.")
+	warn("[Daemon] Hooking failed: " .. tostring(err))
 end
 
 -- ==========================================
