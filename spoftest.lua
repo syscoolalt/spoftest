@@ -1,5 +1,5 @@
 -- ====================================================================
--- HEADLESS IDENTITY & AVATAR SPOOFER (EXECUTION CODE)
+-- HEADLESS IDENTITY, AVATAR & INSPECT SPOOFER (EXECUTION CODE)
 -- Upload this entire block to your GitHub raw link!
 -- ====================================================================
 
@@ -11,6 +11,7 @@ local localPlayer = Players.LocalPlayer
 
 local realUsername = localPlayer.Name
 local realDisplayName = localPlayer.DisplayName
+local realUserId = localPlayer.UserId
 
 local function escapePattern(str)
 	return str:gsub("([^%w])", "%%%1")
@@ -185,7 +186,7 @@ local function replaceCoreElements()
 	local function handleImageLabel(imageLabel)
 		local function updateImage()
 			local imageStr = imageLabel.Image
-			local realUserIdStr = tostring(localPlayer.UserId)
+			local realUserIdStr = tostring(realUserId)
 			local targetUserIdStr = tostring(getTargetId())
 			
 			local targetHeadshot = "rbxthumb://type=AvatarHeadShot&id=" .. targetUserIdStr .. "&w=150&h=150"
@@ -249,8 +250,9 @@ local function replaceCoreElements()
 end
 
 -- ==========================================
--- 3. INTERCEPT INSPECT ENGINE (HOOKMETAMETHOD)
+-- 3. INTERCEPT INDEX CORES & INSPECT MENU
 -- ==========================================
+-- A: Hook Metatable Indexing
 local successHook, err = pcall(function()
 	local oldIndex
 	oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
@@ -265,41 +267,40 @@ local successHook, err = pcall(function()
 		end
 		return oldIndex(self, key)
 	end))
-
-	local oldNamecall
-	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-		local method = getnamecallmethod()
-		local args = {...}
-		
-		-- Intercept Players Service requests for Avatar Descriptions (Inspect Menu assets)
-		if self == Players and (method == "GetHumanoidDescriptionFromUserId" or method == "GetCharacterAppearanceAsync" or method == "GetCharacterAppearanceInfoAsync") then
-			if args[1] == localPlayer.UserId then
-				if isEmptyInspectEnabled() then
-					return oldNamecall(self, 0) -- Forces a blank, unequipped slate
-				end
-				return oldNamecall(self, getTargetId(), unpack(args, 2))
-			end
-		end
-		
-		-- Intercept GuiService Inspect Menu openings
-		if self == GuiService and (method == "InspectPlayerFromUserId" or method == "InspectPlayerFromHumanoidDescription") then
-			if args[1] == localPlayer.UserId or args[1] == getTargetId() then
-				if isEmptyInspectEnabled() then
-					local blankDescription = Instance.new("HumanoidDescription")
-					return oldNamecall(self, blankDescription, "Empty Spoofer Profile")
-				end
-				return oldNamecall(self, getTargetId(), unpack(args, 2))
-			end
-		end
-		
-		return oldNamecall(self, ...)
-	end))
 end)
 
 if successHook then
-	print("[Daemon] Engine detours applied cleanly via hookmetamethod.")
+	print("[Daemon] Metatable detours applied cleanly via hookmetamethod.")
 else
 	warn("[Daemon] Hooking failed: " .. tostring(err))
+end
+
+-- B: Hook Inspect Menu (GuiService)
+if GuiService then
+	local successInspectHook, inspectErr = pcall(function()
+		local oldInspect
+		oldInspect = hookfunction(GuiService.InspectPlayerFromUserId, newcclosure(function(self, userId, ...)
+			if not checkcaller() then
+				-- If the game/core scripts try to inspect your real ID or your spoofed ID
+				if userId == realUserId or userId == getTargetId() then
+					if isEmptyInspectEnabled() then
+						-- Redirect inspect call to a dummy account that has 0 items (e.g. ID 4)
+						return oldInspect(self, 4, ...)
+					else
+						-- Redirect to the target ID so it inspects their actual avatar/items
+						return oldInspect(self, getTargetId(), ...)
+					end
+				end
+			end
+			return oldInspect(self, userId, ...)
+		end))
+	end)
+	
+	if successInspectHook then
+		print("[Daemon] Avatar inspect spoofer hook successfully mounted!")
+	else
+		warn("[Daemon] Failed to hook Inspect service: " .. tostring(inspectErr))
+	end
 end
 
 -- ==========================================
