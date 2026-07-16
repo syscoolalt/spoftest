@@ -250,59 +250,54 @@ local function replaceCoreElements()
 end
 
 -- ==========================================
--- 3. INTERCEPT INDEX CORES & INSPECT MENU
+-- 3. INTERCEPT INSPECT ENGINE (INTEGRATED)
 -- ==========================================
--- A: Hook Metatable Indexing
 local successHook, err = pcall(function()
-	local oldIndex
-	oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
-		if not checkcaller() and self == localPlayer then
-			if key == "UserId" then
-				return getTargetId()
-			elseif key == "Name" then
-				return getSpoofUsername()
-			elseif key == "DisplayName" then
-				return getSpoofDisplayName()
-			end
-		end
-		return oldIndex(self, key)
-	end))
+    local GuiService = game:GetService("GuiService")
+    local Players = game:GetService("Players")
+    local localPlayer = Players.LocalPlayer
+
+    -- 1. Suppress default menu to prevent crashes
+    pcall(function() GuiService:SetInspectMenuEnabled(false) end)
+
+    -- 2. Custom function to render the spoofed look
+    local function showSpoofedInspect()
+        local targetId = getTargetId()
+        local success, desc = pcall(function()
+            return Players:GetHumanoidDescriptionFromUserId(targetId)
+        end)
+        
+        if success and desc then
+            -- Injecting the description into the custom viewer
+            GuiService:InspectPlayerFromHumanoidDescription(desc, getSpoofDisplayName())
+        else
+            warn("[Daemon] Failed to fetch spoofed appearance.")
+        end
+    end
+
+    -- 3. Intercept the namecalls
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        -- Intercept Inspect requests
+        if self == GuiService and (method == "InspectPlayerFromUserId" or method == "InspectPlayerFromHumanoidDescription") then
+            if args[1] == localPlayer.UserId or args[1] == getTargetId() then
+                showSpoofedInspect()
+                return -- Block default logic
+            end
+        end
+        
+        return oldNamecall(self, ...)
+    end))
 end)
 
 if successHook then
-	print("[Daemon] Metatable detours applied cleanly via hookmetamethod.")
+    print("[Daemon] Inspect Spoofer injected into main flow.")
 else
-	warn("[Daemon] Hooking failed: " .. tostring(err))
+    warn("[Daemon] Inspect hooking failed: " .. tostring(err))
 end
-
--- B: Hook Inspect Menu (GuiService)
-if GuiService then
-	local successInspectHook, inspectErr = pcall(function()
-		local oldInspect
-		oldInspect = hookfunction(GuiService.InspectPlayerFromUserId, newcclosure(function(self, userId, ...)
-			if not checkcaller() then
-				-- If the game/core scripts try to inspect your real ID or your spoofed ID
-				if userId == realUserId or userId == getTargetId() then
-					if isEmptyInspectEnabled() then
-						-- Redirect inspect call to a dummy account that has 0 items (e.g. ID 4)
-						return oldInspect(self, 4, ...)
-					else
-						-- Redirect to the target ID so it inspects their actual avatar/items
-						return oldInspect(self, getTargetId(), ...)
-					end
-				end
-			end
-			return oldInspect(self, userId, ...)
-		end))
-	end)
-	
-	if successInspectHook then
-		print("[Daemon] Avatar inspect spoofer hook successfully mounted!")
-	else
-		warn("[Daemon] Failed to hook Inspect service: " .. tostring(inspectErr))
-	end
-end
-
 -- ==========================================
 -- 4. INITIALIZATION & SPAWN BINDINGS
 -- ==========================================
